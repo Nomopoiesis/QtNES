@@ -88,6 +88,15 @@ pub enum Mnemonic {
     BIT,
     ROL,
     PLP,
+    BMI,
+    SEC,
+    RTI,
+    EOR,
+    LSR,
+    JMP,
+    BVC,
+    CLI,
+    RTS,
 }
 
 #[derive(Clone, Copy)]
@@ -681,6 +690,19 @@ impl Operation for Rol {
 }
 impl ModifyOp for Rol {}
 
+struct Lsr;
+impl Operation for Lsr {
+    #[inline(always)]
+    fn execute(cpu: &mut CPU) {
+        // bit 0 goes into carry, bit 7 becomes 0 so N is always cleared
+        cpu.status
+            .set(StatusFlags::CARRY, (cpu.op_latch & 0x01) != 0);
+        cpu.op_latch >>= 1;
+        set_zn_flags(cpu, cpu.op_latch);
+    }
+}
+impl ModifyOp for Lsr {}
+
 struct Ora;
 impl Operation for Ora {
     #[inline(always)]
@@ -700,6 +722,16 @@ impl Operation for And {
     }
 }
 impl ReadOp for And {}
+
+struct Eor;
+impl Operation for Eor {
+    #[inline(always)]
+    fn execute(cpu: &mut CPU) {
+        cpu.registers.a ^= cpu.op_latch;
+        set_zn_flags(cpu, cpu.registers.a);
+    }
+}
+impl ReadOp for Eor {}
 
 struct Bit;
 impl Operation for Bit {
@@ -725,6 +757,24 @@ impl Operation for Clc {
     }
 }
 impl ImpliedOp for Clc {}
+
+struct Cli;
+impl Operation for Cli {
+    #[inline(always)]
+    fn execute(cpu: &mut CPU) {
+        cpu.status.set(StatusFlags::INTERRUPT_DISABLE, false);
+    }
+}
+impl ImpliedOp for Cli {}
+
+struct Sec;
+impl Operation for Sec {
+    #[inline(always)]
+    fn execute(cpu: &mut CPU) {
+        cpu.status.set(StatusFlags::CARRY, true);
+    }
+}
+impl ImpliedOp for Sec {}
 
 fn brk_implied(cpu: &mut CPU, bus: &mut impl Bus) {
     match cpu.instruction_cycle {
@@ -941,6 +991,203 @@ fn rol_absolute(cpu: &mut CPU, bus: &mut impl Bus) {
     operation_absolute_rmw::<Rol>(cpu, bus);
 }
 
+fn bmi_relative(cpu: &mut CPU, bus: &mut impl Bus) {
+    relative_branch::<Bmi>(cpu, bus);
+}
+
+fn and_indirecty(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_indirecty::<And>(cpu, bus);
+}
+
+fn and_zeropagex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropagex::<And>(cpu, bus);
+}
+
+fn rol_zeropagex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropagex_rmw::<Rol>(cpu, bus);
+}
+
+fn sec_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_implied::<Sec>(cpu, bus);
+}
+
+fn and_absolutey(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolutey::<And>(cpu, bus);
+}
+
+fn and_absolutex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolutex::<And>(cpu, bus);
+}
+
+fn rol_absolutex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolutex_rmw::<Rol>(cpu, bus);
+}
+
+fn rti_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    match cpu.instruction_cycle {
+        1 => {
+            // dummy read
+            let _ = bus.read(cpu.registers.pc);
+            cpu.increment_pc();
+            step_instruction!(cpu);
+        }
+        2 => {
+            // dummy read of the stack
+            let _ = bus.read(u16::from_le_bytes([cpu.registers.sp, 0x01]));
+            step_instruction!(cpu);
+        }
+        3 => {
+            // pull status, B and unused bits are not real flags: keep the current ones
+            let pulled = cpu.pop_stack(bus);
+            let ignored = StatusFlags::BREAK_COMMAND | StatusFlags::UNUSED;
+            cpu.status.0 = (pulled & !ignored) | (cpu.status.0 & ignored);
+            step_instruction!(cpu);
+        }
+        4 => {
+            // pull PCL
+            let pcl = cpu.pop_stack(bus);
+            cpu.registers.pc = u16::from_le_bytes([pcl, u16_high_byte(cpu.registers.pc)]);
+            step_instruction!(cpu);
+        }
+        5 => {
+            // pull PCH
+            let pch = cpu.pop_stack(bus);
+            cpu.registers.pc = u16::from_le_bytes([u16_low_byte(cpu.registers.pc), pch]);
+            end_instruction!(cpu);
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn eor_xindirect(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_xindirect::<Eor>(cpu, bus);
+}
+
+fn eor_zeropage(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropage::<Eor>(cpu, bus);
+}
+
+fn lsr_zeropage(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropage_rmw::<Lsr>(cpu, bus);
+}
+
+fn pha_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    match cpu.instruction_cycle {
+        1 => {
+            // dummy read
+            let _ = bus.read(cpu.registers.pc);
+            step_instruction!(cpu);
+        }
+        2 => {
+            // push accumulator onto stack
+            cpu.push_stack(bus, cpu.registers.a);
+            end_instruction!(cpu);
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn eor_immediate(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_immediate::<Eor>(cpu, bus);
+}
+
+fn lsr_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_implied::<OnA<Lsr>>(cpu, bus);
+}
+
+fn jmp_absolute(cpu: &mut CPU, bus: &mut impl Bus) {
+    match cpu.instruction_cycle {
+        1 => {
+            // fetch low byte of address
+            cpu.adl_latch = bus.read(cpu.registers.pc);
+            cpu.increment_pc();
+            step_instruction!(cpu);
+        }
+        2 => {
+            // fetch high byte of address
+            cpu.adh_latch = bus.read(cpu.registers.pc);
+            cpu.registers.pc = u16::from_le_bytes([cpu.adl_latch, cpu.adh_latch]);
+            end_instruction!(cpu);
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn eor_absolute(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolute::<Eor>(cpu, bus);
+}
+
+fn lsr_absolute(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolute_rmw::<Lsr>(cpu, bus);
+}
+
+fn bvc_relative(cpu: &mut CPU, bus: &mut impl Bus) {
+    relative_branch::<Bvc>(cpu, bus);
+}
+
+fn eor_indirecty(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_indirecty::<Eor>(cpu, bus);
+}
+
+fn eor_zeropagex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropagex::<Eor>(cpu, bus);
+}
+
+fn lsr_zeropagex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropagex_rmw::<Lsr>(cpu, bus);
+}
+
+fn cli_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_implied::<Cli>(cpu, bus);
+}
+
+fn eor_absolutey(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolutey::<Eor>(cpu, bus);
+}
+
+fn eor_absolutex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolutex::<Eor>(cpu, bus);
+}
+
+fn lsr_absolutex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolutex_rmw::<Lsr>(cpu, bus);
+}
+
+fn rts_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    match cpu.instruction_cycle {
+        1 => {
+            // dummy read
+            let _ = bus.read(cpu.registers.pc);
+            step_instruction!(cpu);
+        }
+        2 => {
+            // dummy read of the stack
+            let _ = bus.read(u16::from_le_bytes([cpu.registers.sp, 0x01]));
+            step_instruction!(cpu);
+        }
+        3 => {
+            // pull PCL
+            let pcl = cpu.pop_stack(bus);
+            cpu.registers.pc = u16::from_le_bytes([pcl, u16_high_byte(cpu.registers.pc)]);
+            step_instruction!(cpu);
+        }
+        4 => {
+            // pull PCH
+            let pch = cpu.pop_stack(bus);
+            cpu.registers.pc = u16::from_le_bytes([u16_low_byte(cpu.registers.pc), pch]);
+            step_instruction!(cpu);
+        }
+        5 => {
+            // JSR pushed the address of its last byte: dummy read there, then
+            // step past it to the instruction after the JSR
+            let _ = bus.read(cpu.registers.pc);
+            cpu.increment_pc();
+            end_instruction!(cpu);
+        }
+        _ => unreachable!(),
+    }
+}
+
 instructions! {
     0x00 => BRK, Implied, 7, [2,3,4], brk_implied;
     0x01 => ORA, XIndirect, 6, [], ora_xindirect;
@@ -970,6 +1217,33 @@ instructions! {
     0x2C => BIT, Absolute, 4, [], bit_absolute;
     0x2D => AND, Absolute, 4, [], and_absolute;
     0x2E => ROL, Absolute, 6, [4, 5], rol_absolute;
+    0x30 => BMI, Relative, 2, [], bmi_relative;
+    0x31 => AND, IndirectY, 5, [], and_indirecty;
+    0x35 => AND, ZeroPageX, 4, [], and_zeropagex;
+    0x36 => ROL, ZeroPageX, 6, [4, 5], rol_zeropagex;
+    0x38 => SEC, Implied, 2, [], sec_implied;
+    0x39 => AND, AbsoluteY, 4, [], and_absolutey;
+    0x3D => AND, AbsoluteX, 4, [], and_absolutex;
+    0x3E => ROL, AbsoluteX, 7, [5, 6], rol_absolutex;
+    0x40 => RTI, Implied, 6, [], rti_implied;
+    0x41 => EOR, XIndirect, 6, [], eor_xindirect;
+    0x45 => EOR, ZeroPage, 3, [], eor_zeropage;
+    0x46 => LSR, ZeroPage, 5, [3, 4], lsr_zeropage;
+    0x48 => PHA, Implied, 3, [2], pha_implied;
+    0x49 => EOR, Immediate, 2, [], eor_immediate;
+    0x4A => LSR, Implied, 2, [], lsr_implied;
+    0x4C => JMP, Absolute, 3, [], jmp_absolute;
+    0x4D => EOR, Absolute, 4, [], eor_absolute;
+    0x4E => LSR, Absolute, 6, [4, 5], lsr_absolute;
+    0x50 => BVC, Relative, 2, [], bvc_relative;
+    0x51 => EOR, IndirectY, 5, [], eor_indirecty;
+    0x55 => EOR, ZeroPageX, 4, [], eor_zeropagex;
+    0x56 => LSR, ZeroPageX, 6, [4, 5], lsr_zeropagex;
+    0x58 => CLI, Implied, 2, [], cli_implied;
+    0x59 => EOR, AbsoluteY, 4, [], eor_absolutey;
+    0x5D => EOR, AbsoluteX, 4, [], eor_absolutex;
+    0x5E => LSR, AbsoluteX, 7, [5, 6], lsr_absolutex;
+    0x60 => RTS, Implied, 6, [], rts_implied;
 }
 
 pub fn is_write_cycle(op_code: u8, instruction_cycle: u8) -> bool {

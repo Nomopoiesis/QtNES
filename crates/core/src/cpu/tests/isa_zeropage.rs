@@ -6,6 +6,8 @@ const ASL_ZEROPAGE: u8 = 0x06;
 const BIT_ZEROPAGE: u8 = 0x24;
 const AND_ZEROPAGE: u8 = 0x25;
 const ROL_ZEROPAGE: u8 = 0x26;
+const EOR_ZEROPAGE: u8 = 0x45;
+const LSR_ZEROPAGE: u8 = 0x46;
 
 #[test]
 fn ora_zeropage() {
@@ -272,4 +274,117 @@ fn rol_zeropage_carry_in_and_out_together() {
     assert_eq!(bus.memory[0x0010], 0x01);
     assert!(cpu.status.get(StatusFlags::CARRY));
     assert!(!cpu.status.get(StatusFlags::ZERO));
+}
+
+#[test]
+fn eor_zeropage() {
+    let (mut cpu, mut bus) = setup(&[EOR_ZEROPAGE, 0x10]);
+    bus.memory[0x0010] = 0xFF;
+    cpu.registers.a = 0x0F;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0xF0);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(EOR_ZEROPAGE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0010),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0010], 0xFF);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn eor_zeropage_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[EOR_ZEROPAGE, 0x10]);
+    // a value XOR itself is zero
+    bus.memory[0x0010] = 0xA5;
+    cpu.registers.a = 0xA5;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn lsr_zeropage() {
+    let (mut cpu, mut bus) = setup(&[LSR_ZEROPAGE, 0x10]);
+    bus.memory[0x0010] = 0x82;
+    cpu.registers.a = 0x55;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0010], 0x41);
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(LSR_ZEROPAGE));
+    // read-modify-write: the unmodified value is written back before the result
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0010),
+            Access::Write(0x0010, 0x82),
+            Access::Write(0x0010, 0x41),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.registers.a, 0x55);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn lsr_zeropage_shifts_bit_0_into_carry() {
+    let (mut cpu, mut bus) = setup(&[LSR_ZEROPAGE, 0x10]);
+    bus.memory[0x0010] = 0x01;
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0010], 0x00);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn lsr_zeropage_shifts_zero_into_bit_7() {
+    let (mut cpu, mut bus) = setup(&[LSR_ZEROPAGE, 0x10]);
+    // carry set beforehand must not be shifted in, unlike ROR
+    bus.memory[0x0010] = 0xFF;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0010], 0x7F);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
 }
