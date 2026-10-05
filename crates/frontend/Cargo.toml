@@ -1,0 +1,9 @@
+[package]
+name = "qtnes"
+description = "QtNES frontend: window, audio, input and debug views around qtnes-core."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qtnes-core.workspace = true

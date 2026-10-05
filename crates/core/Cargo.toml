@@ -1,0 +1,8 @@
+[package]
+name = "qtnes-core"
+description = "Cycle-accurate NES emulation core. No I/O, no windowing, no threads."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
