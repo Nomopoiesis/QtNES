@@ -4,6 +4,7 @@ use crate::cpu::StatusFlags;
 const ORA_ABSOLUTEY: u8 = 0x19;
 const AND_ABSOLUTEY: u8 = 0x39;
 const EOR_ABSOLUTEY: u8 = 0x59;
+const ADC_ABSOLUTEY: u8 = 0x79;
 
 #[test]
 fn ora_absolutey() {
@@ -248,6 +249,88 @@ fn eor_absolutey_page_cross_takes_extra_cycle() {
 
     assert_eq!(cpu.registers.a, 0x33);
     assert_eq!(cycles, table_cycles(EOR_ABSOLUTEY) + 1);
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1210), // dummy read: high byte not fixed yet
+            Access::Read(0x1310),
+        ]
+    );
+}
+
+#[test]
+fn adc_absolutey() {
+    // base address $1200 + Y $34 = $1234, no page cross
+    let (mut cpu, mut bus) = setup(&[ADC_ABSOLUTEY, 0x00, 0x12]);
+    bus.memory[0x1234] = 0x20;
+    cpu.registers.y = 0x34;
+    cpu.registers.a = 0x10;
+    cpu.registers.x = 0x11;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    // $10 + $20 + carry
+    assert_eq!(cpu.registers.a, 0x31);
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::OVERFLOW));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(ADC_ABSOLUTEY));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x1234], 0x20);
+    assert_eq!(cpu.registers.x, 0x11);
+    assert_eq!(cpu.registers.y, 0x34);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn adc_absolutey_sets_carry_and_overflow() {
+    let (mut cpu, mut bus) = setup(&[ADC_ABSOLUTEY, 0x00, 0x12]);
+    bus.memory[0x1234] = 0x90;
+    cpu.registers.y = 0x34;
+    cpu.registers.a = 0xD0;
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    // $D0 + $90 = $160: two negatives giving a positive is a signed overflow
+    assert_eq!(cpu.registers.a, 0x60);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+}
+
+#[test]
+fn adc_absolutey_page_cross_takes_extra_cycle() {
+    // base $12F0 + Y $20 = $1310, crossing from page $12 to $13
+    let (mut cpu, mut bus) = setup(&[ADC_ABSOLUTEY, 0xF0, 0x12]);
+    bus.memory[0x1310] = 0x02;
+    // the dummy read hits $1210; its value must not reach the accumulator
+    bus.memory[0x1210] = 0x80;
+    cpu.registers.y = 0x20;
+    cpu.registers.a = 0x01;
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x03);
+    assert_eq!(cycles, table_cycles(ADC_ABSOLUTEY) + 1);
     assert_eq!(
         bus.accesses,
         [

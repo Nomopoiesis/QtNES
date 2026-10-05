@@ -4,6 +4,7 @@ use crate::cpu::StatusFlags;
 const ORA_INDIRECTY: u8 = 0x11;
 const AND_INDIRECTY: u8 = 0x31;
 const EOR_INDIRECTY: u8 = 0x51;
+const ADC_INDIRECTY: u8 = 0x71;
 
 #[test]
 fn ora_indirecty() {
@@ -311,4 +312,64 @@ fn eor_indirecty_page_cross_takes_extra_cycle() {
             Access::Read(0x1310),
         ]
     );
+}
+
+#[test]
+fn adc_indirecty() {
+    let (mut cpu, mut bus) = setup(&[ADC_INDIRECTY, 0x20]);
+    // pointer at $20 holds the base address $1200, Y is added after the indirection
+    bus.memory[0x0020] = 0x00;
+    bus.memory[0x0021] = 0x12;
+    bus.memory[0x1234] = 0x20;
+    cpu.registers.y = 0x34;
+    cpu.registers.a = 0x10;
+    cpu.registers.x = 0x11;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    // $10 + $20 + carry
+    assert_eq!(cpu.registers.a, 0x31);
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::OVERFLOW));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(ADC_INDIRECTY));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020),
+            Access::Read(0x0021),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x1234], 0x20);
+    assert_eq!(cpu.registers.x, 0x11);
+    assert_eq!(cpu.registers.y, 0x34);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn adc_indirecty_sets_overflow_and_negative() {
+    let (mut cpu, mut bus) = setup(&[ADC_INDIRECTY, 0x20]);
+    bus.memory[0x0020] = 0x00;
+    bus.memory[0x0021] = 0x12;
+    bus.memory[0x1234] = 0x50;
+    cpu.registers.y = 0x34;
+    cpu.registers.a = 0x50;
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    // two positives giving a negative result is a signed overflow
+    assert_eq!(cpu.registers.a, 0xA0);
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
 }

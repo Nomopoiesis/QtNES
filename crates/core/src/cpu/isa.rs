@@ -97,6 +97,11 @@ pub enum Mnemonic {
     BVC,
     CLI,
     RTS,
+    ADC,
+    ROR,
+    BVS,
+    PLA,
+    SEI,
 }
 
 #[derive(Clone, Copy)]
@@ -109,6 +114,7 @@ pub enum Mode {
     ZeroPage,
     ZeroPageX,
     Relative,
+    Indirect,
     XIndirect,
     IndirectY,
 }
@@ -703,6 +709,20 @@ impl Operation for Lsr {
 }
 impl ModifyOp for Lsr {}
 
+struct Ror;
+impl Operation for Ror {
+    #[inline(always)]
+    fn execute(cpu: &mut CPU) {
+        // shift right, the old carry goes into bit 7 and bit 0 goes into carry
+        let carry_in = cpu.status.get(StatusFlags::CARRY) as u8;
+        cpu.status
+            .set(StatusFlags::CARRY, (cpu.op_latch & 0x01) != 0);
+        cpu.op_latch = (cpu.op_latch >> 1) | (carry_in << 7);
+        set_zn_flags(cpu, cpu.op_latch);
+    }
+}
+impl ModifyOp for Ror {}
+
 struct Ora;
 impl Operation for Ora {
     #[inline(always)]
@@ -732,6 +752,27 @@ impl Operation for Eor {
     }
 }
 impl ReadOp for Eor {}
+
+struct Adc;
+impl Operation for Adc {
+    #[inline(always)]
+    fn execute(cpu: &mut CPU) {
+        // the 2A03 has no decimal mode: the D flag is ignored
+        let a = cpu.registers.a;
+        let operand = cpu.op_latch;
+        let sum = a as u16 + operand as u16 + cpu.status.get(StatusFlags::CARRY) as u16;
+        let result = u16_low_byte(sum);
+        cpu.status.set(StatusFlags::CARRY, sum > 0xFF);
+        // signed overflow: both inputs have the same sign and the result has the other one
+        cpu.status.set(
+            StatusFlags::OVERFLOW,
+            (!(a ^ operand) & (a ^ result) & 0x80) != 0,
+        );
+        cpu.registers.a = result;
+        set_zn_flags(cpu, result);
+    }
+}
+impl ReadOp for Adc {}
 
 struct Bit;
 impl Operation for Bit {
@@ -775,6 +816,14 @@ impl Operation for Sec {
     }
 }
 impl ImpliedOp for Sec {}
+
+struct Sei;
+impl Operation for Sei {
+    fn execute(cpu: &mut CPU) {
+        cpu.status.set(StatusFlags::INTERRUPT_DISABLE, true);
+    }
+}
+impl ImpliedOp for Sei {}
 
 fn brk_implied(cpu: &mut CPU, bus: &mut impl Bus) {
     match cpu.instruction_cycle {
@@ -1188,6 +1237,112 @@ fn rts_implied(cpu: &mut CPU, bus: &mut impl Bus) {
     }
 }
 
+fn adc_xindirect(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_xindirect::<Adc>(cpu, bus);
+}
+
+fn adc_zeropage(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropage::<Adc>(cpu, bus);
+}
+
+fn ror_zeropage(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropage_rmw::<Ror>(cpu, bus);
+}
+
+fn pla_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    match cpu.instruction_cycle {
+        1 => {
+            // dummy read of the next instruction byte
+            let _ = bus.read(cpu.registers.pc);
+            step_instruction!(cpu);
+        }
+        2 => {
+            // dummy read of the stack
+            let _ = bus.read(u16::from_le_bytes([cpu.registers.sp, 0x01]));
+            step_instruction!(cpu);
+        }
+        3 => {
+            cpu.registers.a = cpu.pop_stack(bus);
+            set_zn_flags(cpu, cpu.registers.a);
+            end_instruction!(cpu);
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn adc_immediate(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_immediate::<Adc>(cpu, bus);
+}
+
+fn ror_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_implied::<OnA<Ror>>(cpu, bus);
+}
+
+fn jmp_indirect(cpu: &mut CPU, bus: &mut impl Bus) {
+    match cpu.instruction_cycle {
+        1 => {
+            // fetch low byte of pointer
+            cpu.adl_latch = bus.read(cpu.registers.pc);
+            cpu.increment_pc();
+            step_instruction!(cpu);
+        }
+        2 => {
+            // fetch high byte of pointer
+            cpu.adh_latch = bus.read(cpu.registers.pc);
+            cpu.increment_pc();
+            step_instruction!(cpu);
+        }
+        3 => {
+            // fetch low byte of address
+            cpu.op_latch = bus.read(u16::from_le_bytes([cpu.adl_latch, cpu.adh_latch]));
+            step_instruction!(cpu);
+        }
+        4 => {
+            // fetch high byte of address and set pc
+            let tmp = cpu.op_latch;
+            cpu.op_latch = bus.read(u16::from_le_bytes([
+                cpu.adl_latch.wrapping_add(1),
+                cpu.adh_latch,
+            ]));
+            cpu.registers.pc = u16::from_le_bytes([tmp, cpu.op_latch]);
+            end_instruction!(cpu);
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn adc_absolute(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolute::<Adc>(cpu, bus);
+}
+
+fn ror_absolute(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolute_rmw::<Ror>(cpu, bus);
+}
+
+fn bvs_relative(cpu: &mut CPU, bus: &mut impl Bus) {
+    relative_branch::<Bvs>(cpu, bus);
+}
+
+fn adc_indirecty(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_indirecty::<Adc>(cpu, bus);
+}
+
+fn adc_zeropagex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropagex::<Adc>(cpu, bus);
+}
+
+fn ror_zeropagex(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_zeropagex_rmw::<Ror>(cpu, bus);
+}
+
+fn sei_implied(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_implied::<Sei>(cpu, bus);
+}
+
+fn adc_absolutey(cpu: &mut CPU, bus: &mut impl Bus) {
+    operation_absolutey::<Adc>(cpu, bus);
+}
+
 instructions! {
     0x00 => BRK, Implied, 7, [2,3,4], brk_implied;
     0x01 => ORA, XIndirect, 6, [], ora_xindirect;
@@ -1244,6 +1399,21 @@ instructions! {
     0x5D => EOR, AbsoluteX, 4, [], eor_absolutex;
     0x5E => LSR, AbsoluteX, 7, [5, 6], lsr_absolutex;
     0x60 => RTS, Implied, 6, [], rts_implied;
+    0x61 => ADC, XIndirect, 6, [], adc_xindirect;
+    0x65 => ADC, ZeroPage, 3, [], adc_zeropage;
+    0x66 => ROR, ZeroPage, 5, [3, 4], ror_zeropage;
+    0x68 => PLA, Implied, 4, [], pla_implied;
+    0x69 => ADC, Immediate, 2, [], adc_immediate;
+    0x6A => ROR, Implied, 2, [], ror_implied;
+    0x6C => JMP, Indirect, 5, [], jmp_indirect;
+    0x6D => ADC, Absolute, 4, [], adc_absolute;
+    0x6E => ROR, Absolute, 6, [4, 5], ror_absolute;
+    0x70 => BVS, Relative, 2, [], bvs_relative;
+    0x71 => ADC, IndirectY, 5, [], adc_indirecty;
+    0x75 => ADC, ZeroPageX, 4, [], adc_zeropagex;
+    0x76 => ROR, ZeroPageX, 6, [4, 5], ror_zeropagex;
+    0x78 => SEI, Implied, 2, [], sei_implied;
+    0x79 => ADC, AbsoluteY, 4, [], adc_absolutey;
 }
 
 pub fn is_write_cycle(op_code: u8, instruction_cycle: u8) -> bool {

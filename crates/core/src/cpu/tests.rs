@@ -1,13 +1,16 @@
-//! CPU instruction tests, one file per addressing mode.
+//! CPU tests: instruction tests, one file per addressing mode, and interrupt
+//! sequence tests.
 //!
 //! These are a child module of `cpu` so they can set up and inspect private
 //! CPU state directly.
 
+mod interrupts;
 mod isa_absolute;
 mod isa_absolutex;
 mod isa_absolutey;
 mod isa_immediate;
 mod isa_implied;
+mod isa_indirect;
 mod isa_indirecty;
 mod isa_relative;
 mod isa_xindirect;
@@ -117,6 +120,54 @@ fn run_instruction(cpu: &mut CPU, bus: &mut TestBus) -> u8 {
     }
     panic!(
         "instruction did not finish within {MAX_INSTRUCTION_CYCLES} cycles, bus accesses: {:?}",
+        bus.accesses
+    );
+}
+
+/// The NMI and IRQ sequences take 7 cycles.
+const MAX_INTERRUPT_CYCLES: u8 = 7;
+
+/// Steps the CPU through one complete interrupt sequence (NMI or IRQ) and
+/// returns the number of cycles it took.
+///
+/// Makes the same per-cycle checks as `run_instruction`: exactly one bus access
+/// per cycle, and a write exactly when `CPU::is_write_cycle` predicted one.
+///
+/// Panics if the CPU is not in an interrupt state when called, or has not
+/// returned to `Run` after `MAX_INTERRUPT_CYCLES`.
+fn run_interrupt(cpu: &mut CPU, bus: &mut TestBus) -> u8 {
+    assert!(
+        matches!(cpu.state, CPUState::NMI | CPUState::IRQ),
+        "run_interrupt called while the CPU is not in an interrupt state"
+    );
+    for cycles in 1..=MAX_INTERRUPT_CYCLES {
+        let cycle = cpu.interrupt_cycle;
+        let predicted_write = cpu.is_write_cycle();
+        let accesses_before = bus.accesses.len();
+
+        cpu.step(bus);
+
+        let accesses = &bus.accesses[accesses_before..];
+        assert_eq!(
+            accesses.len(),
+            1,
+            "interrupt cycle {cycle}: expected exactly one bus access, got {accesses:?}"
+        );
+        let was_write = matches!(accesses[0], Access::Write(..));
+        assert_eq!(
+            was_write,
+            predicted_write,
+            "interrupt cycle {cycle}: is_write_cycle predicted {}, the cycle did {:?}",
+            if predicted_write { "a write" } else { "a read" },
+            accesses[0]
+        );
+
+        if matches!(cpu.state, CPUState::Run) {
+            return cycles;
+        }
+    }
+    panic!(
+        "interrupt sequence did not finish within {MAX_INTERRUPT_CYCLES} cycles, bus accesses: {:?}",
         bus.accesses
     );
 }

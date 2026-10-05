@@ -14,6 +14,9 @@ const LSR_IMPLIED: u8 = 0x4A;
 const CLI: u8 = 0x58;
 const RTS: u8 = 0x60;
 const JSR: u8 = 0x20;
+const PLA: u8 = 0x68;
+const ROR_IMPLIED: u8 = 0x6A;
+const SEI: u8 = 0x78;
 
 #[test]
 fn asl_implied() {
@@ -693,4 +696,165 @@ fn rts_stack_pointer_wraps() {
             Access::Read(0x0101),
         ]
     );
+}
+
+#[test]
+fn pla() {
+    let (mut cpu, mut bus) = setup(&[PLA]);
+    cpu.registers.sp = 0xFC;
+    bus.memory[0x01FD] = 0x82;
+    cpu.registers.a = 0x00;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x82);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.sp, 0xFD);
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(PLA));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1), // dummy read of the next byte
+            Access::Read(0x01FC),            // dummy read of the stack
+            Access::Read(0x01FD),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn pla_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[PLA]);
+    cpu.registers.sp = 0xFC;
+    bus.memory[0x01FD] = 0x00;
+    cpu.registers.a = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn pla_restores_what_pha_pushed() {
+    let (mut cpu, mut bus) = setup(&[PHA, PLA]);
+    cpu.registers.a = 0x42;
+
+    run_instruction(&mut cpu, &mut bus);
+    cpu.registers.a = 0x00;
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x42);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn pla_stack_pointer_wraps() {
+    let (mut cpu, mut bus) = setup(&[PLA]);
+    cpu.registers.sp = 0xFF;
+    bus.memory[0x0100] = 0x42;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x42);
+    assert_eq!(cpu.registers.sp, 0x00);
+    assert_eq!(
+        bus.accesses[2..],
+        [Access::Read(0x01FF), Access::Read(0x0100)]
+    );
+}
+
+#[test]
+fn ror_implied() {
+    let (mut cpu, mut bus) = setup(&[ROR_IMPLIED]);
+    // carry in goes to bit 7, bit 0 goes out to carry
+    cpu.registers.a = 0x02;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x81);
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(ROR_IMPLIED));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn ror_implied_shifts_bit_0_into_carry() {
+    let (mut cpu, mut bus) = setup(&[ROR_IMPLIED]);
+    cpu.registers.a = 0x01;
+    cpu.status.set(StatusFlags::CARRY, false);
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x00);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn sei() {
+    let (mut cpu, mut bus) = setup(&[SEI]);
+    // every flag clear, so the test also shows only interrupt disable changes
+    cpu.status.0 = 0x00;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::INTERRUPT_DISABLE));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(SEI));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.status.0, StatusFlags::INTERRUPT_DISABLE);
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sei_when_interrupt_disable_already_set() {
+    let (mut cpu, mut bus) = setup(&[SEI]);
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
 }
