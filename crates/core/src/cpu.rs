@@ -37,9 +37,11 @@ pub struct CPU {
     adh_latch: u8, // high address latch
     op_latch:  u8, // operand/data latch
 
-    page_crossed: bool,
-    nmi_pending:  bool,
-    irq_pending:  bool,
+    page_crossed:   bool,
+    nmi_pending:    bool,
+    irq_pending:    bool,
+    interrupt_poll: bool,
+    hold_interrupt: bool, // set by an instruction to skip one poll
 }
 
 impl CPU {
@@ -57,6 +59,8 @@ impl CPU {
             page_crossed:      false,
             nmi_pending:       false,
             irq_pending:       false,
+            interrupt_poll:    false,
+            hold_interrupt:    false,
         }
     }
 
@@ -123,8 +127,13 @@ impl CPU {
     }
 
     fn run_step(&mut self, bus: &mut impl Bus) {
-        let interrupt_poll = (self.irq_pending && !self.status.get(StatusFlags::INTERRUPT_DISABLE))
-            || self.nmi_pending;
+        if !self.hold_interrupt {
+            self.interrupt_poll = (self.irq_pending
+                && !self.status.get(StatusFlags::INTERRUPT_DISABLE))
+                || self.nmi_pending;
+        }
+        self.hold_interrupt = false;
+
         if self.instruction_cycle == 0 {
             // instruciton cycle zero means new instruction
             self.op_code = bus.read(self.registers.pc);
@@ -134,7 +143,7 @@ impl CPU {
             // Execute instruction
             isa::execute(self, bus);
 
-            if self.instruction_cycle == 0 && interrupt_poll {
+            if self.instruction_cycle == 0 && self.interrupt_poll {
                 if self.nmi_pending {
                     // NMI interrupt pending - takes priority
                     self.state = CPUState::NMI;

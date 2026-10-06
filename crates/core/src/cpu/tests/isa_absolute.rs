@@ -12,6 +12,18 @@ const EOR_ABSOLUTE: u8 = 0x4D;
 const LSR_ABSOLUTE: u8 = 0x4E;
 const ADC_ABSOLUTE: u8 = 0x6D;
 const ROR_ABSOLUTE: u8 = 0x6E;
+const STY_ABSOLUTE: u8 = 0x8C;
+const STA_ABSOLUTE: u8 = 0x8D;
+const STX_ABSOLUTE: u8 = 0x8E;
+const LDY_ABSOLUTE: u8 = 0xAC;
+const LDA_ABSOLUTE: u8 = 0xAD;
+const LDX_ABSOLUTE: u8 = 0xAE;
+const CPY_ABSOLUTE: u8 = 0xCC;
+const CMP_ABSOLUTE: u8 = 0xCD;
+const DEC_ABSOLUTE: u8 = 0xCE;
+const CPX_ABSOLUTE: u8 = 0xEC;
+const SBC_ABSOLUTE: u8 = 0xED;
+const INC_ABSOLUTE: u8 = 0xEE;
 
 #[test]
 fn ora_absolute() {
@@ -629,4 +641,674 @@ fn ror_absolute_shifts_bit_0_into_carry() {
     assert!(cpu.status.get(StatusFlags::CARRY));
     assert!(cpu.status.get(StatusFlags::ZERO));
     assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn sty_absolute() {
+    let (mut cpu, mut bus) = setup(&[STY_ABSOLUTE, 0x34, 0x12]);
+    cpu.registers.y = 0x80;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    // every flag set except B: a store changes none of them
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+    bus.memory[0x1234] = 0x55;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(STY_ABSOLUTE));
+    // the target is written without being read first
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Write(0x1234, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x80);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sty_absolute_does_not_change_flags_for_zero() {
+    let (mut cpu, mut bus) = setup(&[STY_ABSOLUTE, 0x34, 0x12]);
+    cpu.registers.y = 0x00;
+    cpu.status.0 = 0x00;
+    bus.memory[0x1234] = 0x55;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    // storing zero does not set Z
+    assert_eq!(bus.memory[0x1234], 0x00);
+    assert_eq!(cpu.status.0, 0x00);
+}
+
+#[test]
+fn sta_absolute() {
+    let (mut cpu, mut bus) = setup(&[STA_ABSOLUTE, 0x34, 0x12]);
+    cpu.registers.a = 0x80;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    // every flag set except B: a store changes none of them
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+    bus.memory[0x1234] = 0x55;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(STA_ABSOLUTE));
+    // the target is written without being read first
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Write(0x1234, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+    assert_eq!(cpu.registers.a, 0x80);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sta_absolute_does_not_change_flags_for_zero() {
+    let (mut cpu, mut bus) = setup(&[STA_ABSOLUTE, 0x34, 0x12]);
+    cpu.registers.a = 0x00;
+    cpu.status.0 = 0x00;
+    bus.memory[0x1234] = 0x55;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    // storing zero does not set Z
+    assert_eq!(bus.memory[0x1234], 0x00);
+    assert_eq!(cpu.status.0, 0x00);
+}
+
+#[test]
+fn stx_absolute() {
+    let (mut cpu, mut bus) = setup(&[STX_ABSOLUTE, 0x34, 0x12]);
+    cpu.registers.x = 0x80;
+    cpu.registers.a = 0x11;
+    cpu.registers.y = 0x33;
+    // every flag set except B: a store changes none of them
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+    bus.memory[0x1234] = 0x55;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(STX_ABSOLUTE));
+    // the target is written without being read first
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Write(0x1234, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x80);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn stx_absolute_does_not_change_flags_for_zero() {
+    let (mut cpu, mut bus) = setup(&[STX_ABSOLUTE, 0x34, 0x12]);
+    cpu.registers.x = 0x00;
+    cpu.status.0 = 0x00;
+    bus.memory[0x1234] = 0x55;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    // storing zero does not set Z
+    assert_eq!(bus.memory[0x1234], 0x00);
+    assert_eq!(cpu.status.0, 0x00);
+}
+
+#[test]
+fn ldy_absolute() {
+    let (mut cpu, mut bus) = setup(&[LDY_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x80;
+    cpu.registers.y = 0x11;
+    cpu.registers.a = 0x22;
+    cpu.registers.x = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(LDY_ABSOLUTE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x22);
+    assert_eq!(cpu.registers.x, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn ldy_absolute_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[LDY_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x00;
+    cpu.registers.y = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn lda_absolute() {
+    let (mut cpu, mut bus) = setup(&[LDA_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x80;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(LDA_ABSOLUTE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn lda_absolute_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[LDA_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x00;
+    cpu.registers.a = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn ldx_absolute() {
+    let (mut cpu, mut bus) = setup(&[LDX_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x80;
+    cpu.registers.x = 0x11;
+    cpu.registers.a = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(LDX_ABSOLUTE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn ldx_absolute_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[LDX_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x00;
+    cpu.registers.x = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn cpy_absolute() {
+    // Y greater than the operand: C set, Z clear, N from $50 - $30 = $20
+    let (mut cpu, mut bus) = setup(&[CPY_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x30;
+    cpu.registers.y = 0x50;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(CPY_ABSOLUTE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed: the compare does not store its result
+    assert_eq!(cpu.registers.y, 0x50);
+    assert_eq!(bus.memory[0x1234], 0x30);
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn cpy_absolute_equal_sets_zero_and_carry() {
+    let (mut cpu, mut bus) = setup(&[CPY_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x42;
+    cpu.registers.y = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn cpy_absolute_less_than_clears_carry() {
+    // $30 - $50 borrows; the wrapped difference $E0 has bit 7 set
+    let (mut cpu, mut bus) = setup(&[CPY_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x50;
+    cpu.registers.y = 0x30;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn cmp_absolute() {
+    // A greater than the operand: C set, Z clear, N from $50 - $30 = $20
+    let (mut cpu, mut bus) = setup(&[CMP_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x30;
+    cpu.registers.a = 0x50;
+    cpu.registers.x = 0x11;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(CMP_ABSOLUTE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed: the compare does not store its result
+    assert_eq!(cpu.registers.a, 0x50);
+    assert_eq!(bus.memory[0x1234], 0x30);
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.x, 0x11);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn cmp_absolute_equal_sets_zero_and_carry() {
+    let (mut cpu, mut bus) = setup(&[CMP_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x42;
+    cpu.registers.a = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn cmp_absolute_less_than_clears_carry() {
+    // $30 - $50 borrows; the wrapped difference $E0 has bit 7 set
+    let (mut cpu, mut bus) = setup(&[CMP_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x50;
+    cpu.registers.a = 0x30;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn dec_absolute() {
+    let (mut cpu, mut bus) = setup(&[DEC_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x81;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(DEC_ABSOLUTE));
+    // read-modify-write: the unmodified value is written back before the result
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+            Access::Write(0x1234, 0x81),
+            Access::Write(0x1234, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn dec_absolute_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[DEC_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x01;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn dec_absolute_wraps_from_zero_to_ff() {
+    let (mut cpu, mut bus) = setup(&[DEC_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x00;
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0xFF);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn cpx_absolute() {
+    // X greater than the operand: C set, Z clear, N from $50 - $30 = $20
+    let (mut cpu, mut bus) = setup(&[CPX_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x30;
+    cpu.registers.x = 0x50;
+    cpu.registers.a = 0x11;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(CPX_ABSOLUTE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed: the compare does not store its result
+    assert_eq!(cpu.registers.x, 0x50);
+    assert_eq!(bus.memory[0x1234], 0x30);
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn cpx_absolute_equal_sets_zero_and_carry() {
+    let (mut cpu, mut bus) = setup(&[CPX_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x42;
+    cpu.registers.x = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn cpx_absolute_less_than_clears_carry() {
+    // $30 - $50 borrows; the wrapped difference $E0 has bit 7 set
+    let (mut cpu, mut bus) = setup(&[CPX_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x50;
+    cpu.registers.x = 0x30;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn sbc_absolute() {
+    // carry set means no borrow: $50 - $20 = $30
+    let (mut cpu, mut bus) = setup(&[SBC_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x20;
+    cpu.registers.a = 0x50;
+    cpu.registers.x = 0x11;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x30);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::OVERFLOW));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(SBC_ABSOLUTE));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x1234], 0x20);
+    assert_eq!(cpu.registers.x, 0x11);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sbc_absolute_subtracts_borrow_when_carry_clear() {
+    // carry clear means borrow: $50 - $20 - 1 = $2F
+    let (mut cpu, mut bus) = setup(&[SBC_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x20;
+    cpu.registers.a = 0x50;
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x2F);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn inc_absolute() {
+    let (mut cpu, mut bus) = setup(&[INC_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0x7F;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 3);
+    assert_eq!(cycles, table_cycles(INC_ABSOLUTE));
+    // read-modify-write: the unmodified value is written back before the result
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(PROGRAM_START + 2),
+            Access::Read(0x1234),
+            Access::Write(0x1234, 0x7F),
+            Access::Write(0x1234, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn inc_absolute_wraps_from_ff_to_zero() {
+    let (mut cpu, mut bus) = setup(&[INC_ABSOLUTE, 0x34, 0x12]);
+    bus.memory[0x1234] = 0xFF;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x1234], 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
 }

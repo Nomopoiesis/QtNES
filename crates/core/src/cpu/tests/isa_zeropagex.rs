@@ -9,6 +9,14 @@ const EOR_ZEROPAGEX: u8 = 0x55;
 const LSR_ZEROPAGEX: u8 = 0x56;
 const ADC_ZEROPAGEX: u8 = 0x75;
 const ROR_ZEROPAGEX: u8 = 0x76;
+const STY_ZEROPAGEX: u8 = 0x94;
+const STA_ZEROPAGEX: u8 = 0x95;
+const LDY_ZEROPAGEX: u8 = 0xB4;
+const LDA_ZEROPAGEX: u8 = 0xB5;
+const CMP_ZEROPAGEX: u8 = 0xD5;
+const DEC_ZEROPAGEX: u8 = 0xD6;
+const SBC_ZEROPAGEX: u8 = 0xF5;
+const INC_ZEROPAGEX: u8 = 0xF6;
 
 #[test]
 fn ora_zeropagex() {
@@ -523,4 +531,460 @@ fn ror_zeropagex_shifts_bit_0_into_carry() {
     assert!(cpu.status.get(StatusFlags::CARRY));
     assert!(cpu.status.get(StatusFlags::ZERO));
     assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn sty_zeropagex() {
+    let (mut cpu, mut bus) = setup(&[STY_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x55;
+    bus.memory[0x0020] = 0x99;
+    cpu.registers.x = 0x04;
+    cpu.registers.y = 0x80;
+    cpu.registers.a = 0x11;
+    // every flag set except B: a store changes none of them
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0024], 0x80);
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(STY_ZEROPAGEX));
+    // the target is written without being read first
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Write(0x0024, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0020], 0x99);
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.y, 0x80);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sty_zeropagex_index_wraps_within_zero_page() {
+    let (mut cpu, mut bus) = setup(&[STY_ZEROPAGEX, 0xF0]);
+    cpu.registers.x = 0x20;
+    cpu.registers.y = 0x42;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    // $F0 + $20 wraps to $10, not $0110
+    assert_eq!(bus.memory[0x0010], 0x42);
+    assert_eq!(bus.memory[0x0110], 0x00);
+}
+
+#[test]
+fn sta_zeropagex() {
+    let (mut cpu, mut bus) = setup(&[STA_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x55;
+    bus.memory[0x0020] = 0x99;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x80;
+    cpu.registers.y = 0x22;
+    // every flag set except B: a store changes none of them
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0024], 0x80);
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(STA_ZEROPAGEX));
+    // the target is written without being read first
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Write(0x0024, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0020], 0x99);
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+    assert_eq!(cpu.registers.a, 0x80);
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn ldy_zeropagex() {
+    let (mut cpu, mut bus) = setup(&[LDY_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x80;
+    // the dummy read hits $20; its value must not reach Y
+    bus.memory[0x0020] = 0x01;
+    cpu.registers.x = 0x04;
+    cpu.registers.y = 0x11;
+    cpu.registers.a = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(LDY_ZEROPAGEX));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Read(0x0024),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0024], 0x80);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x22);
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn ldy_zeropagex_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[LDY_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0x00;
+    cpu.registers.x = 0x04;
+    cpu.registers.y = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn lda_zeropagex() {
+    let (mut cpu, mut bus) = setup(&[LDA_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x80;
+    // the dummy read hits $20; its value must not reach the accumulator
+    bus.memory[0x0020] = 0x01;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x11;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(LDA_ZEROPAGEX));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Read(0x0024),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0024], 0x80);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn lda_zeropagex_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[LDA_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0x00;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn cmp_zeropagex() {
+    // A greater than the operand: C set, Z clear, N from $50 - $30 = $20
+    let (mut cpu, mut bus) = setup(&[CMP_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x30;
+    // the dummy read hits $20; comparing against it would give Z
+    bus.memory[0x0020] = 0x50;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x50;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(CMP_ZEROPAGEX));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Read(0x0024),
+        ]
+    );
+
+    // nothing else changed: the compare does not store its result
+    assert_eq!(cpu.registers.a, 0x50);
+    assert_eq!(bus.memory[0x0024], 0x30);
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn cmp_zeropagex_equal_sets_zero_and_carry() {
+    let (mut cpu, mut bus) = setup(&[CMP_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0x42;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn cmp_zeropagex_less_than_clears_carry() {
+    // $30 - $50 borrows; the wrapped difference $E0 has bit 7 set
+    let (mut cpu, mut bus) = setup(&[CMP_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0x50;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x30;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn dec_zeropagex() {
+    let (mut cpu, mut bus) = setup(&[DEC_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x81;
+    bus.memory[0x0020] = 0x99;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x55;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0024], 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(DEC_ZEROPAGEX));
+    // read-modify-write: the unmodified value is written back before the result
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Read(0x0024),
+            Access::Write(0x0024, 0x81),
+            Access::Write(0x0024, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0020], 0x99);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x55);
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn dec_zeropagex_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[DEC_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0x01;
+    cpu.registers.x = 0x04;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0024], 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn dec_zeropagex_wraps_from_zero_to_ff() {
+    let (mut cpu, mut bus) = setup(&[DEC_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0x00;
+    cpu.registers.x = 0x04;
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0024], 0xFF);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn sbc_zeropagex() {
+    // carry set means no borrow: $50 - $20 = $30
+    let (mut cpu, mut bus) = setup(&[SBC_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x20;
+    // the dummy read hits $20; its value must not reach the accumulator
+    bus.memory[0x0020] = 0x01;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x50;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x30);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::OVERFLOW));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(SBC_ZEROPAGEX));
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Read(0x0024),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0024], 0x20);
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sbc_zeropagex_sets_overflow_negative_minus_positive() {
+    // -48 - 112 = -160, which does not fit in a signed byte
+    let (mut cpu, mut bus) = setup(&[SBC_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0x70;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0xD0;
+    cpu.status.set(StatusFlags::CARRY, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x60);
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn inc_zeropagex() {
+    let (mut cpu, mut bus) = setup(&[INC_ZEROPAGEX, 0x20]);
+    // effective address is $20 + X = $24
+    bus.memory[0x0024] = 0x7F;
+    bus.memory[0x0020] = 0x99;
+    cpu.registers.x = 0x04;
+    cpu.registers.a = 0x55;
+    cpu.registers.y = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0024], 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 2);
+    assert_eq!(cycles, table_cycles(INC_ZEROPAGEX));
+    // read-modify-write: the unmodified value is written back before the result
+    assert_eq!(
+        bus.accesses,
+        [
+            Access::Read(PROGRAM_START),
+            Access::Read(PROGRAM_START + 1),
+            Access::Read(0x0020), // dummy read of the un-indexed address
+            Access::Read(0x0024),
+            Access::Write(0x0024, 0x7F),
+            Access::Write(0x0024, 0x80),
+        ]
+    );
+
+    // nothing else changed
+    assert_eq!(bus.memory[0x0020], 0x99);
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x55);
+    assert_eq!(cpu.registers.x, 0x04);
+    assert_eq!(cpu.registers.y, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn inc_zeropagex_wraps_from_ff_to_zero() {
+    let (mut cpu, mut bus) = setup(&[INC_ZEROPAGEX, 0x20]);
+    bus.memory[0x0024] = 0xFF;
+    cpu.registers.x = 0x04;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0024], 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
 }

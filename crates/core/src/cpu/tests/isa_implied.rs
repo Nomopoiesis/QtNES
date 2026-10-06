@@ -17,6 +17,20 @@ const JSR: u8 = 0x20;
 const PLA: u8 = 0x68;
 const ROR_IMPLIED: u8 = 0x6A;
 const SEI: u8 = 0x78;
+const DEY: u8 = 0x88;
+const TXA: u8 = 0x8A;
+const TYA: u8 = 0x98;
+const TXS: u8 = 0x9A;
+const TAY: u8 = 0xA8;
+const TAX: u8 = 0xAA;
+const CLV: u8 = 0xB8;
+const TSX: u8 = 0xBA;
+const INY: u8 = 0xC8;
+const DEX: u8 = 0xCA;
+const CLD: u8 = 0xD8;
+const INX: u8 = 0xE8;
+const NOP: u8 = 0xEA;
+const SED: u8 = 0xF8;
 
 #[test]
 fn asl_implied() {
@@ -857,4 +871,664 @@ fn sei_when_interrupt_disable_already_set() {
     run_instruction(&mut cpu, &mut bus);
 
     assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+}
+
+#[test]
+fn dey() {
+    let (mut cpu, mut bus) = setup(&[DEY]);
+    cpu.registers.y = 0x81;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(DEY));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn dey_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[DEY]);
+    cpu.registers.y = 0x01;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn dey_wraps_from_zero_to_ff() {
+    let (mut cpu, mut bus) = setup(&[DEY]);
+    cpu.registers.y = 0x00;
+    cpu.status.set(StatusFlags::ZERO, true);
+    // DEY does not touch carry, unlike a subtraction
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0xFF);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn txa() {
+    let (mut cpu, mut bus) = setup(&[TXA]);
+    cpu.registers.x = 0x80;
+    cpu.registers.a = 0x11;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(TXA));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.x, 0x80);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn txa_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[TXA]);
+    cpu.registers.x = 0x00;
+    cpu.registers.a = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn tya() {
+    let (mut cpu, mut bus) = setup(&[TYA]);
+    cpu.registers.y = 0x80;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(TYA));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x80);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn tya_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[TYA]);
+    cpu.registers.y = 0x00;
+    cpu.registers.a = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.a, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn txs() {
+    let (mut cpu, mut bus) = setup(&[TXS]);
+    cpu.registers.x = 0x80;
+    cpu.registers.a = 0x11;
+    cpu.registers.y = 0x33;
+    // N clear and Z set: if TXS set flags from $80 both would flip
+    cpu.status.0 = StatusFlags::ZERO | StatusFlags::CARRY;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.sp, 0x80);
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(TXS));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed: TXS sets no flags
+    assert_eq!(cpu.status.0, StatusFlags::ZERO | StatusFlags::CARRY);
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x80);
+    assert_eq!(cpu.registers.y, 0x33);
+}
+
+#[test]
+fn txs_does_not_set_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[TXS]);
+    cpu.registers.x = 0x00;
+    cpu.status.0 = StatusFlags::NEGATIVE;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.sp, 0x00);
+    assert_eq!(cpu.status.0, StatusFlags::NEGATIVE);
+}
+
+#[test]
+fn txs_moves_where_pha_pushes() {
+    let (mut cpu, mut bus) = setup(&[TXS, PHA]);
+    cpu.registers.x = 0x40;
+    cpu.registers.a = 0x42;
+
+    run_instruction(&mut cpu, &mut bus);
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(bus.memory[0x0140], 0x42);
+    assert_eq!(cpu.registers.sp, 0x3F);
+}
+
+#[test]
+fn tay() {
+    let (mut cpu, mut bus) = setup(&[TAY]);
+    cpu.registers.a = 0x80;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x11;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(TAY));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x80);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn tay_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[TAY]);
+    cpu.registers.a = 0x00;
+    cpu.registers.y = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn tax() {
+    let (mut cpu, mut bus) = setup(&[TAX]);
+    cpu.registers.a = 0x80;
+    cpu.registers.x = 0x11;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(TAX));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x80);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn tax_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[TAX]);
+    cpu.registers.a = 0x00;
+    cpu.registers.x = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn clv() {
+    let (mut cpu, mut bus) = setup(&[CLV]);
+    // every flag set, so the test also shows only overflow changes
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(!cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(CLV));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert_eq!(
+        cpu.status.0,
+        0xFF & !StatusFlags::BREAK_COMMAND & !StatusFlags::OVERFLOW
+    );
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn clv_when_overflow_already_clear() {
+    let (mut cpu, mut bus) = setup(&[CLV]);
+    cpu.status.0 = 0x00;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.status.0, 0x00);
+}
+
+#[test]
+fn tsx() {
+    let (mut cpu, mut bus) = setup(&[TSX]);
+    cpu.registers.sp = 0x80;
+    cpu.registers.x = 0x11;
+    cpu.registers.a = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(TSX));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.sp, 0x80);
+    assert_eq!(cpu.registers.a, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+}
+
+#[test]
+fn tsx_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[TSX]);
+    cpu.registers.sp = 0x00;
+    cpu.registers.x = 0x42;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn tsx_reads_back_what_txs_set() {
+    let (mut cpu, mut bus) = setup(&[TXS, TSX]);
+    cpu.registers.x = 0x5A;
+
+    run_instruction(&mut cpu, &mut bus);
+    cpu.registers.x = 0x00;
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x5A);
+    assert_eq!(cpu.registers.sp, 0x5A);
+}
+
+#[test]
+fn iny() {
+    let (mut cpu, mut bus) = setup(&[INY]);
+    cpu.registers.y = 0x7F;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(INY));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed: INY does not set V even though $7F + 1 is a signed overflow
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn iny_wraps_from_ff_to_zero() {
+    let (mut cpu, mut bus) = setup(&[INY]);
+    cpu.registers.y = 0xFF;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    // INY does not touch carry, unlike an addition
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.y, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn dex() {
+    let (mut cpu, mut bus) = setup(&[DEX]);
+    cpu.registers.x = 0x81;
+    cpu.registers.a = 0x11;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(DEX));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn dex_sets_zero_flag() {
+    let (mut cpu, mut bus) = setup(&[DEX]);
+    cpu.registers.x = 0x01;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+}
+
+#[test]
+fn dex_wraps_from_zero_to_ff() {
+    let (mut cpu, mut bus) = setup(&[DEX]);
+    cpu.registers.x = 0x00;
+    cpu.status.set(StatusFlags::ZERO, true);
+    // DEX does not touch carry, unlike a subtraction
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0xFF);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn cld() {
+    let (mut cpu, mut bus) = setup(&[CLD]);
+    // every flag set, so the test also shows only decimal mode changes
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(!cpu.status.get(StatusFlags::DECIMAL_MODE));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(CLD));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert_eq!(
+        cpu.status.0,
+        0xFF & !StatusFlags::BREAK_COMMAND & !StatusFlags::DECIMAL_MODE
+    );
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn cld_when_decimal_mode_already_clear() {
+    let (mut cpu, mut bus) = setup(&[CLD]);
+    cpu.status.0 = 0x00;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.status.0, 0x00);
+}
+
+#[test]
+fn inx() {
+    let (mut cpu, mut bus) = setup(&[INX]);
+    cpu.registers.x = 0x7F;
+    cpu.registers.a = 0x11;
+    cpu.registers.y = 0x33;
+    cpu.status.set(StatusFlags::CARRY, true);
+    cpu.status.set(StatusFlags::OVERFLOW, true);
+    cpu.status.set(StatusFlags::ZERO, true);
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x80);
+    assert!(cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::ZERO));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(INX));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert!(cpu.status.get(StatusFlags::CARRY));
+    assert!(cpu.status.get(StatusFlags::OVERFLOW));
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn inx_wraps_from_ff_to_zero() {
+    let (mut cpu, mut bus) = setup(&[INX]);
+    cpu.registers.x = 0xFF;
+    cpu.status.set(StatusFlags::NEGATIVE, true);
+    // INX does not touch carry, unlike an addition
+    cpu.status.set(StatusFlags::CARRY, false);
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.x, 0x00);
+    assert!(cpu.status.get(StatusFlags::ZERO));
+    assert!(!cpu.status.get(StatusFlags::NEGATIVE));
+    assert!(!cpu.status.get(StatusFlags::CARRY));
+}
+
+#[test]
+fn nop() {
+    let (mut cpu, mut bus) = setup(&[NOP]);
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(NOP));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sed() {
+    let (mut cpu, mut bus) = setup(&[SED]);
+    // every flag clear, so the test also shows only decimal mode changes
+    cpu.status.0 = 0x00;
+    cpu.registers.a = 0x11;
+    cpu.registers.x = 0x22;
+    cpu.registers.y = 0x33;
+
+    let cycles = run_instruction(&mut cpu, &mut bus);
+
+    assert!(cpu.status.get(StatusFlags::DECIMAL_MODE));
+    assert_eq!(cpu.registers.pc, PROGRAM_START + 1);
+    assert_eq!(cycles, table_cycles(SED));
+    // second cycle is a dummy read of the next byte
+    assert_eq!(
+        bus.accesses,
+        [Access::Read(PROGRAM_START), Access::Read(PROGRAM_START + 1)]
+    );
+
+    // nothing else changed
+    assert_eq!(cpu.status.0, StatusFlags::DECIMAL_MODE);
+    assert_eq!(cpu.registers.a, 0x11);
+    assert_eq!(cpu.registers.x, 0x22);
+    assert_eq!(cpu.registers.y, 0x33);
+    assert_eq!(cpu.registers.sp, 0xFD);
+}
+
+#[test]
+fn sed_when_decimal_mode_already_set() {
+    let (mut cpu, mut bus) = setup(&[SED]);
+    cpu.status.0 = 0xFF & !StatusFlags::BREAK_COMMAND;
+
+    run_instruction(&mut cpu, &mut bus);
+
+    assert_eq!(cpu.status.0, 0xFF & !StatusFlags::BREAK_COMMAND);
+}
+
+#[test]
+fn sed_then_cld_round_trip() {
+    let (mut cpu, mut bus) = setup(&[SED, CLD]);
+    cpu.status.0 = 0x00;
+
+    run_instruction(&mut cpu, &mut bus);
+    assert!(cpu.status.get(StatusFlags::DECIMAL_MODE));
+    run_instruction(&mut cpu, &mut bus);
+    assert!(!cpu.status.get(StatusFlags::DECIMAL_MODE));
 }

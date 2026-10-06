@@ -16,6 +16,7 @@ mod isa_relative;
 mod isa_xindirect;
 mod isa_zeropage;
 mod isa_zeropagex;
+mod isa_zeropagey;
 
 use super::isa::INFO;
 use super::{CPU, CPUState};
