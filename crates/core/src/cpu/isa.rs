@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use crate::bus;
 use crate::cpu::StatusFlags;
 use crate::util::{u16_high_byte, u16_low_byte};
 use crate::{bus::Bus, cpu::CPU};

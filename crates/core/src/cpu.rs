@@ -205,7 +205,50 @@ impl CPU {
         }
     }
 
-    fn run_irq(&mut self, bus: &mut impl Bus) {}
+    fn run_irq(&mut self, bus: &mut impl Bus) {
+        match self.interrupt_cycle {
+            0 => {
+                // dummy read
+                let _ = bus.read(self.registers.pc);
+                self.interrupt_cycle += 1;
+            }
+            1 => {
+                // dummy read
+                let _ = bus.read(self.registers.pc);
+                self.interrupt_cycle += 1;
+            }
+            2 => {
+                // push PCH to stack
+                self.push_stack(bus, u16_high_byte(self.registers.pc));
+                self.interrupt_cycle += 1;
+            }
+            3 => {
+                // push PCL to stack
+                self.push_stack(bus, u16_low_byte(self.registers.pc));
+                self.interrupt_cycle += 1;
+            }
+            4 => {
+                // push status to stack - set unused but not break flag
+                self.push_stack(bus, self.status.0 | StatusFlags::UNUSED);
+                self.interrupt_cycle += 1;
+            }
+            5 => {
+                self.status.set(StatusFlags::INTERRUPT_DISABLE, true);
+                // fetch low byte of IRQ vector from 0xFFFE
+                let low = bus.read(0xFFFE);
+                self.registers.pc = u16::from_le_bytes([low, u16_high_byte(self.registers.pc)]);
+                self.interrupt_cycle += 1;
+            }
+            6 => {
+                // fetch high byte of IRQ vector from 0xFFFF
+                let high = bus.read(0xFFFF);
+                self.registers.pc = u16::from_le_bytes([u16_low_byte(self.registers.pc), high]);
+                self.state = CPUState::Run;
+                self.interrupt_cycle = 0;
+            }
+            _ => unreachable!(),
+        }
+    }
 
     fn is_write_cycle(&self) -> bool {
         match self.state {
